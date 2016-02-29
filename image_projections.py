@@ -3,6 +3,9 @@ import math
 from pyproj import Proj, transform
 import pylab
 import sys
+import re
+import json
+import subprocess as sp
 
 
 def deg_to_rad(deg):
@@ -15,6 +18,12 @@ def rad_to_deg(rad):
 
 def unit_vector(v):
     return v / math.sqrt(float(v.dot(v)))
+
+
+def cartesian_dist(loc1, loc2):
+    dx = loc2[0] - loc1[0]
+    dy = loc2[1] - loc1[1]
+    return math.sqrt(dx**2 + dy**2)
 
 
 class Location(object):
@@ -109,7 +118,7 @@ class Camera(object):
         return unit_vector(vector)
 
 
-class Image(object):
+class ImageLocation(object):
     def __init__(self, center=None, attitude=None, camera=None):
         self.center = center
         self.attitude = attitude
@@ -140,6 +149,14 @@ class Image(object):
             return self.center
         return Location(intersection[0], intersection[1], intersection[2], 3857)
 
+    @property
+    def footprint_size(self):
+        dx1 = cartesian_dist(self.intersections[0].cartesian_point, self.intersections[1].cartesian_point)
+        dy1 = cartesian_dist(self.intersections[1].cartesian_point, self.intersections[2].cartesian_point)
+        dx2 = cartesian_dist(self.intersections[2].cartesian_point, self.intersections[3].cartesian_point)
+        dy2 = cartesian_dist(self.intersections[3].cartesian_point, self.intersections[0].cartesian_point)
+        return np.average([dx1, dx2]), np.average([dy1, dy2])
+
 
 def plot_footprints(images):
     pylab.figure()
@@ -163,11 +180,58 @@ def load_cam_data(cam_file):
             center = Location(*map(float, cam[15:18]))
             attitude = Orientation(*map(float, cam[18:21]))
             cam = Camera(20.0)
-            im = Image(center=center, attitude=attitude, camera=cam)
+            im = ImageLocation(center=center, attitude=attitude, camera=cam)
             cam_data.append(im)
         except Exception as e:
             print cam, repr(e)
     return cam_data
+
+
+def get_image_location(image_path):
+    exif_data = get_exif(image_path)
+    center = get_center(exif_data)
+    attitude = get_attitude(exif_data)
+    camera = get_camera(exif_data)
+    return ImageLocation(center=center, attitude=attitude, camera=camera)
+
+
+def get_exif(image):
+    cmd = "exiftool -j -s -g {}".format(image)
+    data = json.loads(sp.check_output(cmd, shell=True))
+    return data[0]
+
+
+def get_center(exif_data):
+    lat = format_dms_exif(exif_data['Composite']['GPSLatitude'])
+    lng = format_dms_exif(exif_data['Composite']['GPSLongitude'])
+    alt = format_alt_exif(exif_data['Composite']['GPSAltitude'])
+    return Location(x=lng, y=lat, z=alt, epsg_code=4326)
+
+
+def get_attitude(exif_data):
+    # pull attitude from exif if available
+    return Orientation()
+
+
+def get_camera(exif_data):
+    data = exif_data['Composite']['FocalLength35efl']
+    f35 = float(data.split('mm')[0].strip())
+    return Camera(f35)
+
+
+def format_alt_exif(info):
+    return float(re.findall(r'\d+', info)[0])
+
+
+def format_dms_exif(info):
+    degs = None
+    data = re.findall(r'\d+', info)
+    if data:
+        data = map(float, data)
+        degs = data[0] + data[1]/60. + data[2]/3600. + data[3]/360000.
+    if 'S' in info or 'W' in info:
+        degs *= -1.
+    return degs
 
 if __name__ == '__main__':
     # yaw = 0.

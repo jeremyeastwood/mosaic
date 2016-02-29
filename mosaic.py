@@ -2,6 +2,7 @@ import cv2, sys, glob, os
 from itertools import combinations
 import numpy as np
 import image_utils
+from image_projections import get_image_location, plot_footprints
 
 
 class Image(object):
@@ -14,6 +15,7 @@ class Image(object):
         self.keypoints = None
         self.descriptors = None
         self.blobs = None
+        self.image_location = None
 
     @property
     def data(self):
@@ -24,10 +26,13 @@ class Image(object):
         return cv2.imread(self.filepath, 0)
 
     def get_features(self, alg='SIFT'):
-        self.keypoints, self.descriptors = image_utils.get_features(self.data, alg='SIFT')
+        self.keypoints, self.descriptors = image_utils.get_features(self.grayscale, alg=alg)
 
     def get_blobs(self):
         self.blobs = image_utils.find_blobs(image_utils.blur(self.grayscale))
+
+    def get_image_location(self):
+        self.image_location = get_image_location(self.filepath)
 
 
 def get_images(file_list):
@@ -122,6 +127,25 @@ class Pair(object):
         cv2.imwrite("warped_mosaic.jpg", mosaic)
 
 
+def get_canvas(images):
+    lngs = []
+    lats = []
+    for im in images:
+        intersections = im.image_location.intersections
+        points = [p.cartesian_point for p in intersections]
+        x, y = zip(*points)
+        lngs.extend(x)
+        lats.extend(y)
+    canvas = [
+        (min(lngs), min(lats)),
+        (min(lngs), max(lats)),
+        (max(lngs), max(lats)),
+        (max(lngs), min(lats)),
+    ]
+    print "canvas: dx={}, dy={}".format(max(lngs) - min(lngs), max(lats) - min(lats))
+    return canvas
+
+
 if __name__ == '__main__':
 
     import optparse
@@ -140,6 +164,12 @@ if __name__ == '__main__':
     #     print im.filename, len(im.blobs)
     #     outfile = os.path.join(im.directory, im.rootname + '_blobs.jpg')
     #     image_utils.draw_keypoints(im.data, im.blobs, outfile)
+
+    for im in images:
+        im.get_image_location()
+        print im.image_location.footprint_size
+    canvas = get_canvas(images)
+    plot_footprints([im.image_location for im in images])
 
     for im in images:
         im.get_features()
