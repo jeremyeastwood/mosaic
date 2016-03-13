@@ -16,6 +16,8 @@ class Image(object):
         self.descriptors = None
         self.blobs = None
         self.image_location = None
+        self.aligned = False
+        self.location_transform = np.identity(3)
 
     @property
     def data(self):
@@ -33,6 +35,12 @@ class Image(object):
 
     def get_image_location(self):
         self.image_location = get_image_location(self.filepath)
+
+    def get_perspective_transform(self):
+        pass
+        # shape = self.grayscale.shape[:2]
+        # footprint = self.image_location.intersections
+        # self.perspecitve_transform = image_utils.get_perspective_transform(shape, footprint)
 
 
 def get_images(file_list):
@@ -127,23 +135,65 @@ class Pair(object):
         cv2.imwrite("warped_mosaic.jpg", mosaic)
 
 
+class Canvas(object):
+    def __init__(self, resolution, bounds):
+        self.bounds = bounds  # [minx, miny, maxx, maxy]
+        self.width = bounds[2] - bounds[0]
+        self.height = bounds[3] - bounds[1]
+        self.resolution = resolution  # rx, ry
+        self.pixels = map(int, [self.width / self.resolution[0], self.height / self.resolution[1]])
+        self.data = self.initialise()
+
+    def initialise(self):
+        self.data = np.zeros((self.pixels[1], self.pixels[0], 3))
+
+    def point_to_pixels(self, point):
+        # print "{} {} {}".format(point[0] - self.bounds[0], self.width, self.resolution[0])
+        # print "{} {} {}".format(self.bounds[3] - self.points[1], self.height, self.resolution[1])
+        px = int((point[0] - self.bounds[0])/self.resolution[0])
+        py = int((self.bounds[3] - point[1])/self.resolution[1])
+
+        print "x: {} - {} - {}: {} {}".format(self.bounds[0], point[0], self.bounds[2], px, self.pixels[0])
+        print "y: {} - {} - {}: {} {}".format(self.bounds[1], point[1], self.bounds[3], py, self.pixels[1])
+        # py = int((point[1] - self.bounds[1])/self.resolution[1])
+        print px, py
+        return [px, py]
+
+
+def tile_image_on_canvas(image, canvas):
+    points = map(canvas.point_to_pixels, [x.cartesian_point for x in image.image_location.intersections])
+
+    print canvas.pixels
+    print points
+    transform = image_utils.get_perspective_transform(image_size=canvas.pixels, pixel_coords=points)
+    # return cv2.warpPerspective(image.data, transform, tuple(canvas.pixels[::-1]))
+    return cv2.warpPerspective(image.data, transform, tuple(canvas.pixels))
+
+
 def get_canvas(images):
     lngs = []
     lats = []
+    min_rx = 1e6
+    min_ry = 1e6
     for im in images:
+        py, px = im.grayscale.shape
+        dx, dy = im.image_location.footprint_size
+        print im.filename
+        rx = dx / px
+        ry = dy / py
+        if rx < min_rx:
+            min_rx = rx
+        if ry < min_ry:
+            min_ry = ry
+        print "{}: {}x{}m, {}x{}px = {}x{}m/px".format(im.filename, dx, dy, px, py, rx, ry)
         intersections = im.image_location.intersections
         points = [p.cartesian_point for p in intersections]
         x, y = zip(*points)
         lngs.extend(x)
         lats.extend(y)
-    canvas = [
-        (min(lngs), min(lats)),
-        (min(lngs), max(lats)),
-        (max(lngs), max(lats)),
-        (max(lngs), min(lats)),
-    ]
-    print "canvas: dx={}, dy={}".format(max(lngs) - min(lngs), max(lats) - min(lats))
-    return canvas
+
+    print "camvas: {}, {}".format((min_rx, min_ry), [min(lngs), min(lats), max(lngs), max(lats)])
+    return Canvas((min_rx, min_ry), [min(lngs), min(lats), max(lngs), max(lats)])
 
 
 if __name__ == '__main__':
@@ -169,7 +219,15 @@ if __name__ == '__main__':
         im.get_image_location()
         print im.image_location.footprint_size
     canvas = get_canvas(images)
+    print canvas.pixels
     plot_footprints([im.image_location for im in images])
+
+    seed_image = images[0]  # set one from middle of map in future
+    mosaic1 = tile_image_on_canvas(images[0], canvas)  # place image on canvas using footprint
+    mosaic2 = tile_image_on_canvas(images[1], canvas)  # place image on canvas using footprint
+    mosaic = image_utils.add_two_images(mosaic1, mosaic2)
+    cv2.imwrite("mosaic.jpg", mosaic)
+    sys.exit(1)
 
     for im in images:
         im.get_features()

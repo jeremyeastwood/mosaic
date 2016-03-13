@@ -103,6 +103,27 @@ def combine_images(im1, im2, H12, H2, size):
     # return warped_im1
 
 
+def generate_warped_image(im, H, size):
+    return cv2.warpPerspective(im, H, size)
+
+
+def add_two_images(im1, im2):
+    mask = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY) != 0
+    im1[mask] = 0
+    return im1 + im2
+
+
+def get_perspective_transform(image_size, pixel_coords):
+    # src = np.float32([[0, 0], [0, image_size[0]], [image_size[1], image_size[0]], [image_size[1], 0]])
+    src = np.float32([[0, 0], [image_size[0], 0], [image_size[0], image_size[1]], [0, image_size[1]]])
+    print src
+    ordered_coords = [pixel_coords[0], pixel_coords[3], pixel_coords[2], pixel_coords[1]]  # clockwise from bottom left
+    # ordered_coords = map(lambda x: x[::-1], ordered_coords)
+    dst = np.float32(ordered_coords)
+    print dst
+    return cv2.getPerspectiveTransform(src, dst)
+
+
 def drawMatches(img1, kp1, img2, kp2, matches, vertical=False):
     """
     My own implementation of cv2.drawMatches as OpenCV 2.4.9

@@ -151,10 +151,10 @@ class ImageLocation(object):
 
     @property
     def footprint_size(self):
-        dx1 = cartesian_dist(self.intersections[0].cartesian_point, self.intersections[1].cartesian_point)
-        dy1 = cartesian_dist(self.intersections[1].cartesian_point, self.intersections[2].cartesian_point)
-        dx2 = cartesian_dist(self.intersections[2].cartesian_point, self.intersections[3].cartesian_point)
-        dy2 = cartesian_dist(self.intersections[3].cartesian_point, self.intersections[0].cartesian_point)
+        dy1 = cartesian_dist(self.intersections[0].cartesian_point, self.intersections[1].cartesian_point)
+        dx1 = cartesian_dist(self.intersections[1].cartesian_point, self.intersections[2].cartesian_point)
+        dy2 = cartesian_dist(self.intersections[2].cartesian_point, self.intersections[3].cartesian_point)
+        dx2 = cartesian_dist(self.intersections[3].cartesian_point, self.intersections[0].cartesian_point)
         return np.average([dx1, dx2]), np.average([dy1, dy2])
 
 
