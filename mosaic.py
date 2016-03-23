@@ -2,7 +2,8 @@ import cv2, sys, glob, os
 from itertools import combinations
 import numpy as np
 import image_utils
-from image_projections import get_image_location, plot_footprints
+import pylab
+from image_projections import get_image_location, plot_footprints, load_cam_data
 
 
 class Image(object):
@@ -26,6 +27,11 @@ class Image(object):
     @property
     def grayscale(self):
         return cv2.imread(self.filepath, 0)
+
+    @property
+    def pixels(self):
+        y, x = self.grayscale.shape
+        return [x, y]
 
     def get_features(self, alg='SIFT'):
         self.keypoints, self.descriptors = image_utils.get_features(self.grayscale, alg=alg)
@@ -153,20 +159,15 @@ class Canvas(object):
         px = int((point[0] - self.bounds[0])/self.resolution[0])
         py = int((self.bounds[3] - point[1])/self.resolution[1])
 
-        print "x: {} - {} - {}: {} {}".format(self.bounds[0], point[0], self.bounds[2], px, self.pixels[0])
-        print "y: {} - {} - {}: {} {}".format(self.bounds[1], point[1], self.bounds[3], py, self.pixels[1])
-        # py = int((point[1] - self.bounds[1])/self.resolution[1])
-        print px, py
+        # print "x: {} - {} - {}: {} {}".format(self.bounds[0], point[0], self.bounds[2], px, self.pixels[0])
+        # print "y: {} - {} - {}: {} {}".format(self.bounds[1], point[1], self.bounds[3], py, self.pixels[1])
+        # print px, py
         return [px, py]
 
 
 def tile_image_on_canvas(image, canvas):
     points = map(canvas.point_to_pixels, [x.cartesian_point for x in image.image_location.intersections])
-
-    print canvas.pixels
-    print points
-    transform = image_utils.get_perspective_transform(image_size=canvas.pixels, pixel_coords=points)
-    # return cv2.warpPerspective(image.data, transform, tuple(canvas.pixels[::-1]))
+    transform = image_utils.get_perspective_transform(image_size=image.pixels, pixel_coords=points)
     return cv2.warpPerspective(image.data, transform, tuple(canvas.pixels))
 
 
@@ -202,6 +203,7 @@ if __name__ == '__main__':
     parser = optparse.OptionParser()
     parser.add_option("--input", dest="input",  type='str', help="input images (required)")
     parser.add_option("--output", dest="output",  type='str', help="output directory (required)")
+    parser.add_option("--cam-file", dest="cam_file",  type='str', help="load cam infrom from data file", default=None)
     opts, args = parser.parse_args()
 
     if not opts.input or not opts.output:
@@ -210,23 +212,42 @@ if __name__ == '__main__':
 
     images = get_images(opts.input)
     # for im in images:
-    #     im.get_blobs()
+    #     im.get_blobs()`
     #     print im.filename, len(im.blobs)
     #     outfile = os.path.join(im.directory, im.rootname + '_blobs.jpg')
     #     image_utils.draw_keypoints(im.data, im.blobs, outfile)
 
-    for im in images:
-        im.get_image_location()
-        print im.image_location.footprint_size
+    if opts.cam_file:
+        cam_data = load_cam_data(opts.cam_file)
+        print "CAM DATA:"
+        print cam_data
+        for im in images:
+            if im.filename in cam_data.keys():
+                im.image_location = cam_data[im.filename]
+            else:
+                print "{} data not found in {} - getting image info from exif".format(im.filename, opts.cam_file)
+                im.get_image_location()
+            print im.image_location.footprint_size
+    else:
+        for im in images:
+            im.get_image_location()
+            print im.image_location.footprint_size
+
     canvas = get_canvas(images)
     print canvas.pixels
     plot_footprints([im.image_location for im in images])
 
     seed_image = images[0]  # set one from middle of map in future
-    mosaic1 = tile_image_on_canvas(images[0], canvas)  # place image on canvas using footprint
-    mosaic2 = tile_image_on_canvas(images[1], canvas)  # place image on canvas using footprint
-    mosaic = image_utils.add_two_images(mosaic1, mosaic2)
-    cv2.imwrite("mosaic.jpg", mosaic)
+    mosaic = tile_image_on_canvas(seed_image, canvas)
+
+    # tile images:
+    for image in images[1:]:
+        print "adding {} to mosaic".format(image.filename)
+        addition = tile_image_on_canvas(image, canvas)
+        mosaic = image_utils.add_two_images(mosaic, addition)
+
+    cv2.imwrite(opts.output, mosaic)
+
     sys.exit(1)
 
     for im in images:
@@ -243,4 +264,3 @@ if __name__ == '__main__':
 
     # for pair in sorted(pairs, key=lambda x: len(x.matches), reverse=True):
     #     print pair.im1.filename, pair.im2.filename, len(pair.matches)
-

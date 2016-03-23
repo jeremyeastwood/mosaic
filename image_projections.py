@@ -168,22 +168,26 @@ def plot_footprints(images):
         pylab.plot(x, y, '-xr')
         pylab.plot(center[0], center[1], 'xk')
     pylab.axes().set_aspect('equal', 'datalim')
-    pylab.show()
+    # pylab.show()
+    pylab.savefig("footprints.jpg")
 
 
 def load_cam_data(cam_file):
-    cam_data = list()
+    print "cam file: {}".format(cam_file)
+    cam_data = dict()
     data = open(cam_file).readlines()[2:-1]
+    print data
+    print "loading data now"
     for line in data:
-        cam = line.split('\t')
+        cam_info = line.split('\t')
         try:
-            center = Location(*map(float, cam[15:18]))
-            attitude = Orientation(*map(float, cam[18:21]))
+            center = Location(*map(float, cam_info[15:18]))
+            attitude = Orientation(*map(float, cam_info[18:21]))
             cam = Camera(20.0)
             im = ImageLocation(center=center, attitude=attitude, camera=cam)
-            cam_data.append(im)
+            cam_data[cam_info[0]] = im
         except Exception as e:
-            print cam, repr(e)
+            print cam_info, repr(e)
     return cam_data
 
 

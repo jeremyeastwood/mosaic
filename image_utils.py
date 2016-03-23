@@ -116,11 +116,11 @@ def add_two_images(im1, im2):
 def get_perspective_transform(image_size, pixel_coords):
     # src = np.float32([[0, 0], [0, image_size[0]], [image_size[1], image_size[0]], [image_size[1], 0]])
     src = np.float32([[0, 0], [image_size[0], 0], [image_size[0], image_size[1]], [0, image_size[1]]])
-    print src
+    # print src
     ordered_coords = [pixel_coords[0], pixel_coords[3], pixel_coords[2], pixel_coords[1]]  # clockwise from bottom left
     # ordered_coords = map(lambda x: x[::-1], ordered_coords)
     dst = np.float32(ordered_coords)
-    print dst
+    # print dst
     return cv2.getPerspectiveTransform(src, dst)
 
 
