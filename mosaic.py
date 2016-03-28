@@ -1,8 +1,7 @@
-import cv2, sys, glob, os
+import cv2, sys, glob, os, time
 from itertools import combinations
 import numpy as np
 import image_utils
-import pylab
 from image_projections import get_image_location, plot_footprints, load_cam_data
 
 
@@ -18,7 +17,7 @@ class Image(object):
         self.blobs = None
         self.image_location = None
         self.aligned = False
-        self.location_transform = np.identity(3)
+        self.location_transform = None
 
     @property
     def data(self):
@@ -42,11 +41,14 @@ class Image(object):
     def get_image_location(self):
         self.image_location = get_image_location(self.filepath)
 
-    def get_perspective_transform(self):
-        pass
-        # shape = self.grayscale.shape[:2]
-        # footprint = self.image_location.intersections
-        # self.perspecitve_transform = image_utils.get_perspective_transform(shape, footprint)
+    def get_tiled_transform(self, canvas):
+        points = map(canvas.point_to_pixels, [x.cartesian_point for x in self.image_location.intersections])
+        self.location_transform = image_utils.get_perspective_transform(image_size=self.pixels, pixel_coords=points)
+
+    def tile_image_on_canvas(self, canvas):
+        if self.location_transform is None:
+            self.get_tiled_transform(canvas)
+        return cv2.warpPerspective(self.data, self.location_transform, tuple(canvas.pixels))
 
 
 def get_images(file_list):
@@ -56,6 +58,17 @@ def get_images(file_list):
 
 def get_pairs(images):
     return [Pair(im1, im2) for (im1, im2) in list(combinations(images, 2))]
+
+
+def get_new_pairs(image, images):
+    # in future can restrict this list to geographically nearest images
+    pairs = []
+    for im in images:
+        if im == image or im.aligned:
+            continue
+        pairs.append(Pair(im, image))
+    print "{} new pairs found for {} from {} total images".format(len(pairs), image.filename, len(images))
+    return pairs
 
 
 class Pair(object):
@@ -165,12 +178,6 @@ class Canvas(object):
         return [px, py]
 
 
-def tile_image_on_canvas(image, canvas):
-    points = map(canvas.point_to_pixels, [x.cartesian_point for x in image.image_location.intersections])
-    transform = image_utils.get_perspective_transform(image_size=image.pixels, pixel_coords=points)
-    return cv2.warpPerspective(image.data, transform, tuple(canvas.pixels))
-
-
 def get_canvas(images):
     lngs = []
     lats = []
@@ -204,6 +211,7 @@ if __name__ == '__main__':
     parser.add_option("--input", dest="input",  type='str', help="input images (required)")
     parser.add_option("--output", dest="output",  type='str', help="output directory (required)")
     parser.add_option("--cam-file", dest="cam_file",  type='str', help="load cam infrom from data file", default=None)
+    parser.add_option("--tile", dest="tile",  action='store_true', help="tile images rather than mosaic them")
     opts, args = parser.parse_args()
 
     if not opts.input or not opts.output:
@@ -237,30 +245,55 @@ if __name__ == '__main__':
     print canvas.pixels
     plot_footprints([im.image_location for im in images])
 
-    seed_image = images[0]  # set one from middle of map in future
-    mosaic = tile_image_on_canvas(seed_image, canvas)
+    start = time.time()
+    seed_image = images[-1]  # set one from middle of map in future
+    mosaic = seed_image.tile_image_on_canvas(canvas)
+    seed_image.aligned = True
 
-    # tile images:
-    for image in images[1:]:
-        print "adding {} to mosaic".format(image.filename)
-        addition = tile_image_on_canvas(image, canvas)
-        mosaic = image_utils.add_two_images(mosaic, addition)
+    if opts.tile:
+        # tile images using location data
+        for image in images[:-1]:
+            print "adding {} to mosaic".format(image.filename)
+            addition = image.tile_image_on_canvas(canvas)
+            mosaic = image_utils.add_two_images(mosaic, addition)
+            image.aligned = True
+        cv2.imwrite(opts.output, mosaic)
+        print "Took {}s to tile {} images".format(time.time() - start, len(images))
+    else:
+        # match images using features
+        for image in images:
+            image.get_features()
+            print image.filename, len(image.keypoints)
+            # image_utils.draw_keypoints(im.data, im.keypoints, os.path.join(im.directory, im.rootname + '_keys.jpg'))
 
-    cv2.imwrite(opts.output, mosaic)
+        # find best image matches to seed image
+        new_pairs = get_new_pairs(seed_image, images)
+        for pair in new_pairs:
+            pair.get_matches(plot=False)
+            print pair.im1.filename, pair.im2.filename, len(pair.matches)
+
+        # get top n images in terms of matches
+        matching_pairs = sorted(new_pairs, key=lambda x: len(x.matches), reverse=True)[:10]
+        print "adding {} images to mosaic".format(len(matching_pairs))
+        # get homography for each pair and use to place each new image on canvas
+        for pair in matching_pairs:
+            pair.get_homography()
+            pair.im1.location_transform = np.dot(pair.im2.location_transform, pair.homography)
+            addition = pair.im1.tile_image_on_canvas(canvas)
+            mosaic = image_utils.add_two_images(mosaic, addition)
+            pair.im1.aligned = True
+        # will need to repeat for all other images at this point...
+        cv2.imwrite(opts.output, mosaic)
+        print "Took {}s to tile {} images".format(time.time() - start, len(images))
 
     sys.exit(1)
 
-    for im in images:
-        im.get_features()
-        print im.filename, len(im.keypoints)
-        # image_utils.draw_keypoints(im.data, im.keypoints, os.path.join(im.directory, im.rootname + '_keys.jpg'))
-
-    pairs = get_pairs(images)
-    print len(pairs)
-    for pair in pairs:
-        pair.get_matches(plot=False)
-        pair.get_homography()
-        pair.generate_mosaic()
+    # pairs = get_pairs(images)
+    # print len(pairs)
+    # for pair in pairs:
+    #     pair.get_matches(plot=False)
+    #     pair.get_homography()
+    #     pair.generate_mosaic()
 
     # for pair in sorted(pairs, key=lambda x: len(x.matches), reverse=True):
     #     print pair.im1.filename, pair.im2.filename, len(pair.matches)
