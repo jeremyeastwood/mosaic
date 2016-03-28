@@ -267,22 +267,42 @@ if __name__ == '__main__':
             # image_utils.draw_keypoints(im.data, im.keypoints, os.path.join(im.directory, im.rootname + '_keys.jpg'))
 
         # find best image matches to seed image
-        new_pairs = get_new_pairs(seed_image, images)
-        for pair in new_pairs:
-            pair.get_matches(plot=False)
-            print pair.im1.filename, pair.im2.filename, len(pair.matches)
+        anchor_images = [seed_image]
 
-        # get top n images in terms of matches
-        matching_pairs = sorted(new_pairs, key=lambda x: len(x.matches), reverse=True)[:10]
-        print "adding {} images to mosaic".format(len(matching_pairs))
-        # get homography for each pair and use to place each new image on canvas
-        for pair in matching_pairs:
-            pair.get_homography()
-            pair.im1.location_transform = np.dot(pair.im2.location_transform, pair.homography)
-            addition = pair.im1.tile_image_on_canvas(canvas)
-            mosaic = image_utils.add_two_images(mosaic, addition)
-            pair.im1.aligned = True
-        # will need to repeat for all other images at this point...
+        counter = 0
+        # while len([i for i in images if not i.aligned]) > 0:
+        while counter < 10:
+            # select anchor image from list of previously selected anchors
+            anchor_image = anchor_images.pop(-1)
+            print "{} images not yet aligned".format(len([i for i in images if not i.aligned]))
+            new_pairs = get_new_pairs(anchor_image, images)
+
+            for pair in new_pairs:
+                pair.get_matches(plot=False)
+                print pair.im1.filename, pair.im2.filename, len(pair.matches)
+
+            # get top n images in terms of matches
+            n = 6
+            matching_pairs = sorted(new_pairs, key=lambda x: len(x.matches), reverse=True)[:n]
+
+            # remove any pairs with less than threshold matches
+            threshold = 80
+            valid_pairs = [p for p in matching_pairs if len(p.matches) > threshold]
+            print "adding {} images to mosaic".format(len(valid_pairs))
+            # get homography for each pair and use to place each new image on canvas
+            for pair in valid_pairs:
+                pair.get_homography()
+                pair.im1.location_transform = np.dot(pair.im2.location_transform, pair.homography)
+                addition = pair.im1.tile_image_on_canvas(canvas)
+                mosaic = image_utils.add_two_images(addition, mosaic)
+                pair.im1.aligned = True
+
+            # set last matched image as anchor image for next round if valid matches found
+            # otherwise use one of the last set
+            if len(valid_pairs) > 1:
+                anchor_images = [v.im1 for v in valid_pairs]
+            counter += 1
+
         cv2.imwrite(opts.output, mosaic)
         print "Took {}s to tile {} images".format(time.time() - start, len(images))
 
